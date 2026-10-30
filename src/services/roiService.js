@@ -4,40 +4,69 @@ import { User } from "../models/User.js";
 import { ROIHistory } from "../models/ROIHistory.js";
 import { WalletTransaction } from "../models/WalletTransaction.js";
 import { roundMoney } from "../utils/money.js";
-import { utcDayKey } from "../utils/date.js";
-// A day is keyed by UTC calendar date. One ROI record per investment/day is enforced by a unique index.
+import {
+  istDayKey,
+  istDayStart,
+  istNextDayStart,
+} from "../utils/date.js";
+
+// One ROI record per investment per IST calendar day.
 export async function processInvestmentRoi(investmentId, day = new Date()) {
-  const dateKey = utcDayKey(day);
-  const date = new Date(`${dateKey}T00:00:00.000Z`);
+  const dateKey = istDayKey(day);
+  const date = istDayStart(dateKey);
+  const nextDay = istNextDayStart(dateKey);
+
   const session = await mongoose.startSession();
   let credited = 0;
+
   try {
     await session.withTransaction(async () => {
       const inv = await Investment.findById(investmentId).session(session);
+
+      if (!inv || inv.status !== "Active") return;
+
+      const investmentStartDay = istDayStart(istDayKey(inv.startDate));
+      const investmentEndDay = istDayStart(istDayKey(inv.endDate));
+
+      // Process only dates within the investment's IST calendar-day period.
       if (
-        !inv ||
-        inv.status !== "Active" ||
-        date < new Date(utcDayKey(inv.startDate) + "T00:00:00.000Z") ||
-        date >= new Date(utcDayKey(inv.endDate) + "T00:00:00.000Z")
-      )
+        date < investmentStartDay ||
+        date >= investmentEndDay
+      ) {
         return;
+      }
+
       const user = await User.findById(inv.user).session(session);
+
       if (!user || user.status !== "Active") return;
+
       const key = `roi:${inv._id}:${dateKey}`;
-      if (await ROIHistory.findOne({ idempotencyKey: key }).session(session))
+
+      // Prevent duplicate ROI credit.
+      if (
+        await ROIHistory.findOne({ idempotencyKey: key }).session(session)
+      ) {
         return;
+      }
+
       const amount = roundMoney(
-        (Number(inv.amount.toString()) * inv.dailyRoiPercent) / 100,
+        (Number(inv.amount.toString()) * inv.dailyRoiPercent) / 100
       );
+
       if (amount <= 0) return;
+
       const balance = roundMoney(
-        Number(user.walletBalance.toString()) + amount,
+        Number(user.walletBalance.toString()) + amount
       );
+
       user.walletBalance = balance.toFixed(2);
+
       user.totalRoiEarned = roundMoney(
-        Number(user.totalRoiEarned.toString()) + amount,
+        Number(user.totalRoiEarned.toString()) + amount
       ).toFixed(2);
+
       await user.save({ session });
+
       await ROIHistory.create(
         [
           {
@@ -49,8 +78,9 @@ export async function processInvestmentRoi(investmentId, day = new Date()) {
             idempotencyKey: key,
           },
         ],
-        { session },
+        { session }
       );
+
       await WalletTransaction.create(
         [
           {
@@ -63,13 +93,13 @@ export async function processInvestmentRoi(investmentId, day = new Date()) {
             description: `Daily ROI ${dateKey}`,
           },
         ],
-        { session },
+        { session }
       );
+
       credited = amount;
-      if (
-        new Date(dateKey + "T00:00:00.000Z").getTime() + 86400000 >=
-        new Date(utcDayKey(inv.endDate) + "T00:00:00.000Z").getTime()
-      ) {
+
+      // Complete the investment after its final eligible IST day.
+      if (nextDay >= investmentEndDay) {
         inv.status = "Completed";
         await inv.save({ session });
       }
@@ -77,30 +107,47 @@ export async function processInvestmentRoi(investmentId, day = new Date()) {
   } finally {
     await session.endSession();
   }
-  return { investmentId: String(investmentId), date: dateKey, credited };
+
+  return {
+    investmentId: String(investmentId),
+    date: dateKey,
+    credited,
+  };
 }
+
 export async function processDailyRoi(day = new Date()) {
-  const dateKey = utcDayKey(day);
+  const dateKey = istDayKey(day);
+
+  const date = istDayStart(dateKey);
+  const nextDay = istNextDayStart(dateKey);
+
   const investments = await Investment.find({
     status: "Active",
-    startDate: { $lt: new Date(`${dateKey}T23:59:59.999Z`) },
-    endDate: { $gt: new Date(`${dateKey}T00:00:00.000Z`) },
+    startDate: { $lt: nextDay },
+    endDate: { $gt: date },
   })
     .select("_id")
     .lean();
+
   const results = [];
+
   for (const inv of investments) {
     try {
-      results.push(await processInvestmentRoi(inv._id, day));
+      results.push(
+        await processInvestmentRoi(inv._id, day)
+      );
     } catch (error) {
       if (error.code === 11000) continue;
+
       console.error(`ROI failed for investment ${inv._id}`, error);
+
       results.push({
         investmentId: String(inv._id),
         error: "processing_failed",
       });
     }
   }
+
   return {
     date: dateKey,
     processed: results.length,

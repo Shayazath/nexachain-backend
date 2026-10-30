@@ -17,7 +17,7 @@ export function startRoiCron() {
     return roiTask;
   }
 
-  const timezone = process.env.CRON_TIMEZONE || "UTC";
+  const timezone = process.env.CRON_TIMEZONE || "Asia/Kolkata";
 
   roiTask = cron.schedule(
     "0 0 * * *",
