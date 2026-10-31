@@ -76,4 +76,4 @@ Live API: https://nexachain-backend-git-525634051724.asia-south1.run.app
 - node-cron runs inside the API process. Cloud Run can stop/restart instances, so in-process cron is not durable and may miss a scheduled execution. A production deployment should use a dedicated scheduler/worker and distributed locking/monitoring.
 - MongoDB transactions require a replica-set or sharded-cluster deployment.
 - The assessment does not define timezone; this implementation uses Asia/Kolkata for the ROI scheduler and ROI calendar-day calculations.
-- Frontend repository: **add your actual frontend GitHub URL here**.
+- Frontend repository: **https://github.com/Shayazath/nexachain-frontend**.
