@@ -1,82 +1,79 @@
-# Nexachain AI — MERN Investment & Referral Demo
+# Nexachain AI — Backend API
 
-A full-stack implementation of the 7-page MERN Stack Developer Technical Assessment: MongoDB/Mongoose schemas, Express REST APIs, JWT authentication, investment and referral business logic, ROI scheduler, and a responsive React dashboard.
+Express.js and MongoDB backend for the Nexachain investment/referral technical-assessment demo.
 
-> **Demo only.** The PDF does not specify real financial terms. Example ROI and referral rates are configurable and are not promises of returns. There are no real-money deposit, withdrawal, or payout integrations.
+## Stack
+
+- Node.js 20+, Express 4, Mongoose 8
+- MongoDB Atlas or MongoDB replica set (transactions are used)
+- JWT authentication and bcrypt password hashing
+- Zod validation, Helmet, CORS allowlist, rate limiting
+- node-cron for daily ROI processing
 
 ## Features
 
-- User registration/login with bcrypt password hashing and JWT-protected endpoints.
-- Mongoose User, Investment, ROIHistory, LevelIncome, and WalletTransaction models with references and indexes.
-- Dashboard summary cards, 30-day earnings chart, ROI/referral history, wallet ledger.
-- Investment creation and paginated history.
-- Direct referrals, nested referral tree, referral code sharing, level income history.
-- Midnight `node-cron` ROI processing, unique idempotency keys and MongoDB transactions.
-- Helmet security headers, CORS allowlist, rate limiting, request validation, centralized error responses.
-- API documentation, business assumptions and basic automated unit tests.
-
-## Requirements
-
-- Node.js 20+ and npm
-- MongoDB replica set (local replica set or MongoDB Atlas). Transactions require replica-set/sharded-cluster support.
+- Registration, login, JWT-protected current-user API
+- Investment creation and paginated investment history
+- Dashboard summary, history, and earnings-chart APIs
+- Direct referral, referral tree, and level-income APIs
+- Transactional wallet debit and referral commission distribution
+- Daily ROI history and wallet credits with idempotency protection
+- IST calendar-day calculations and configurable node-cron timezone
 
 ## Setup (Windows PowerShell)
 
-1. Install Node.js and MongoDB, or create a MongoDB Atlas database.
-2. In the project root:
+```powershell
+Copy-Item .env.example .env
+# Edit .env and set MONGODB_URI and a strong JWT_SECRET (32+ characters)
+npm ci
+npm run seed # optional demo data; use only on a test database
+npm run dev
+```
 
-   ```powershell
-   Copy-Item .env.example server/.env
-   ```
+API runs at `http://localhost:5000`; health endpoint is `/api/health`.
 
-3. Edit `server/.env`: set `MONGODB_URI` and replace `JWT_SECRET` with a random secret of at least 32 characters. The local URI in the example requires a replica set named `rs0`; Atlas connection strings generally already support transactions.
-4. Install packages:
+## Tests
 
-   ```powershell
-   npm install
-   npm install --prefix server
-   npm install --prefix client
-   ```
+```powershell
+npm test
+```
 
-5. Seed a local demo account (optional):
-
-   ```powershell
-   npm run seed --prefix server
-   ```
-
-   Demo login: `demo@nexachain.local` / `DemoPass123!`. Seed data is only a simulated wallet balance. Change/remove these credentials before exposing any environment.
-6. Start API and frontend in separate PowerShell terminals:
-
-   ```powershell
-   npm run dev --prefix server
-   npm run dev --prefix client
-   ```
-
-   Open `http://localhost:5173`. API health: `http://localhost:5000/api/health`.
-
-## Root convenience scripts
-
-After installing root dependencies, `npm run dev` runs both apps. `npm test` runs backend unit tests; `npm run build` builds the React app.
+`npm test` runs the automated utility tests. `npm run test:manual` runs a database-backed manual ROI test and can modify wallet/ledger data; run it only against a disposable test database, never production.
 
 ## Environment variables
 
-See `.env.example` and `docs/BUSINESS_RULES.md` for all variables and assumptions. Keep `.env` out of version control.
+| Name | Purpose | Example/default |
+|---|---|---|
+| `NODE_ENV` | Runtime mode | `development` |
+| `PORT` | HTTP port | `5000` locally |
+| `MONGODB_URI` | MongoDB connection | Set privately |
+| `JWT_SECRET` | JWT signing key (32+ chars) | Set privately |
+| `JWT_EXPIRES_IN` | Token lifetime | `1d` |
+| `CLIENT_ORIGIN` | Allowed frontend origins, comma-separated | `http://localhost:5173` |
+| `MIN_INVESTMENT` | Minimum demo investment | `1000` |
+| `MAX_INVESTMENT` | Maximum demo investment | `1000000` |
+| `DEFAULT_DAILY_ROI_PERCENT` | Demo daily ROI percentage | `0.5` |
+| `LEVEL_COMMISSION_RATES` | Commission percentages by ancestor level | `5,2,1` |
+| `DEMO_INITIAL_WALLET_BALANCE` | Simulated initial wallet balance | `100000` |
+| `ROI_CRON_ENABLED` | Disable only when exactly `false` | `true` |
+| `CRON_TIMEZONE` | node-cron timezone | `Asia/Kolkata` |
+
+Never commit `.env` or real credentials. `.env.example` contains placeholders only.
 
 ## API documentation
 
-See [`docs/API.md`](docs/API.md) for endpoints, authentication, and request examples. See [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md) for unspecified policy assumptions and [`docs/TESTING.md`](docs/TESTING.md) for checks.
+See [`docs/API.md`](docs/API.md). Business assumptions are in [`docs/BUSINESS_RULES.md`](docs/BUSINESS_RULES.md), and test instructions are in [`docs/TESTING.md`](docs/TESTING.md).
 
-## Architecture
+## Deployment
 
-- `server/src/models`: persistence schemas and indexes
-- `server/src/controllers`: HTTP handlers and validation
-- `server/src/services`: authentication, investment, ROI and referral business logic
-- `server/src/jobs`: midnight ROI scheduler
-- `client/src/pages`: login, registration, dashboard, investments, referrals and transaction activity
+The supplied Dockerfile is intended for Cloud Run. Configure all environment variables in the deployment platform and set `CLIENT_ORIGIN` to the exact deployed frontend origin. MongoDB Atlas must permit the Cloud Run service to connect.
 
-## Important deployment notes
+Live API: https://nexachain-backend-git-525634051724.asia-south1.run.app
 
-- Run only one active scheduler instance unless you add distributed job locking. Unique idempotency keys prevent duplicate ledger credits, but a production deployment should also use a dedicated worker/lock strategy and alerting.
-- The midnight cron runs in the configured timezone while ROI records use UTC day keys; align this policy before launch.
-- Configure TLS, strong secrets, secure deployment environment variables, backups, monitoring, audit controls, and proper legal/compliance review before any real-money usage.
-- Production hardening still needed for business-approved cancellation/refund rules, admin operations, deposit/withdrawal/payment integration, email verification, password recovery, and formal integration/load/security tests.
+## Important limitations
+
+- This is a simulated assessment/demo platform. It has no real deposit, withdrawal, payment, or payout integration. Example ROI and referral percentages are assumptions, not guaranteed returns.
+- node-cron runs inside the API process. Cloud Run can stop/restart instances, so in-process cron is not durable and may miss a scheduled execution. A production deployment should use a dedicated scheduler/worker and distributed locking/monitoring.
+- MongoDB transactions require a replica-set or sharded-cluster deployment.
+- The assessment does not define timezone; this implementation uses Asia/Kolkata for the ROI scheduler and ROI calendar-day calculations.
+- Frontend repository: **add your actual frontend GitHub URL here**.
